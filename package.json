@@ -1,0 +1,38 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "test": "node --test \"tests/*.test.js\"",
+    "notes:backfill-hashes": "node scripts/backfillNoteHashes.js"
+  },
+  "engines": {
+    "node": ">=20.x"
+  },
+  "dependencies": {
+    "@getbrevo/brevo": "^5.0.4",
+    "@prisma/client": "^6.0.0",
+    "@supabase/supabase-js": "^2.95.3",
+    "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.10.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "firebase-admin": "^11.11.1",
+    "googleapis": "^181.0.0",
+    "handlebars": "^4.7.8",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.1.1",
+    "nodemon": "^3.1.11",
+    "pdf-lib": "^1.17.1",
+    "prisma": "^6.0.0",
+    "razorpay": "^2.9.6",
+    "yup": "^1.7.1"
+  }
+}
