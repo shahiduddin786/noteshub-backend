@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseUserAgent,
+  parseClientHints,
+  normalizeClientHints,
+  collectClientHints,
+  resolveDeviceSignals,
+  sanitizeStoredRequestSignals,
   evaluateRecoveryEligibility,
   validateDescription,
   sanitizeRegisteredDevice,
@@ -176,4 +181,179 @@ test("rate limit keys are isolated from each other", () => {
   assert.equal(rateLimit({ key: "a", limit: 1, windowMs: 1000 }).allowed, true);
   assert.equal(rateLimit({ key: "a", limit: 1, windowMs: 1000 }).allowed, false);
   assert.equal(rateLimit({ key: "b", limit: 1, windowMs: 1000 }).allowed, true);
+});
+
+const REDUCED_CHROME_UA =
+  "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36";
+const OLD_CHROME_UA =
+  "Mozilla/5.0 (Linux; Android 16; OnePlus Nord 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.5414.118 Mobile Safari/537.36";
+const GENUINE_ANDROID10_UA =
+  "Mozilla/5.0 (Linux; Android 10; SM-G950F Build/QP1A.190711.020) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.5359.128 Mobile Safari/537.36";
+
+test("reduced Chrome UA never reports Android 10 or a device model", () => {
+  const result = parseUserAgent(REDUCED_CHROME_UA);
+  assert.equal(result.osName, "Android");
+  assert.equal(result.osVersion, null);
+  assert.equal(result.osVersionRedacted, true);
+  assert.equal(result.deviceModel, null);
+
+  const signals = resolveDeviceSignals({ userAgent: REDUCED_CHROME_UA });
+  assert.equal(signals.osVersion, null);
+  assert.equal(signals.osVersionSource, null);
+  assert.equal(signals.deviceModel, null);
+  assert.equal(signals.deviceModelSource, null);
+});
+
+test("reduced Chrome UA on Android 16 with Client Hints reports the real version and model", () => {
+  const signals = resolveDeviceSignals({
+    userAgent: REDUCED_CHROME_UA,
+    clientHints: {
+      platform: "Android",
+      platformVersion: "16.0.0",
+      model: "CPH2669",
+      mobile: true,
+    },
+  });
+  assert.equal(signals.osName, "Android");
+  assert.equal(signals.osVersion, "16.0.0");
+  assert.equal(signals.osVersionSource, "client-hints");
+  assert.equal(signals.deviceModel, "CPH2669");
+  assert.equal(signals.deviceModelSource, "client-hints");
+});
+
+test("non-reduced UA keeps its real Android version and model", () => {
+  const result = parseUserAgent(OLD_CHROME_UA);
+  assert.equal(result.osVersion, "16");
+  assert.equal(result.osVersionRedacted, false);
+  assert.equal(result.deviceModel, "OnePlus Nord 5");
+
+  const legacy = parseUserAgent(GENUINE_ANDROID10_UA);
+  assert.equal(legacy.osVersion, "10");
+  assert.equal(legacy.deviceModel, "SM-G950F");
+});
+
+test("Firefox Android UA without Client Hints keeps the browser reported version", () => {
+  const signals = resolveDeviceSignals({
+    userAgent: "Mozilla/5.0 (Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0",
+  });
+  assert.equal(signals.osName, "Android");
+  assert.equal(signals.osVersion, "14");
+  assert.equal(signals.osVersionSource, "user-agent");
+  assert.equal(signals.deviceModel, null);
+});
+
+test("missing or reduced User-Agent yields nulls instead of invented values", () => {
+  assert.equal(parseUserAgent(undefined).osVersion, null);
+  assert.equal(parseUserAgent("").osName, null);
+
+  const noSignals = resolveDeviceSignals({ userAgent: "SomeCustomAgent/1.0" });
+  assert.equal(noSignals.osName, null);
+  assert.equal(noSignals.osVersion, null);
+  assert.equal(noSignals.deviceModel, null);
+
+  const unsupportedHints = resolveDeviceSignals({ userAgent: REDUCED_CHROME_UA, clientHints: {} });
+  assert.equal(unsupportedHints.osVersion, null);
+  assert.equal(unsupportedHints.deviceModel, null);
+});
+
+test("parseClientHints reads structured headers and rejects malformed values", () => {
+  const hints = parseClientHints({
+    "sec-ch-ua-platform": '"Android"',
+    "sec-ch-ua-platform-version": '"16.0.0"',
+    "sec-ch-ua-model": '"CPH2669"',
+    "sec-ch-ua-mobile": "?1",
+  });
+  assert.equal(hints.platform, "Android");
+  assert.equal(hints.platformVersion, "16.0.0");
+  assert.equal(hints.model, "CPH2669");
+  assert.equal(hints.mobile, true);
+
+  const malformed = parseClientHints({
+    "sec-ch-ua-platform": '"Android"',
+    "sec-ch-ua-platform-version": '"soon"',
+    "sec-ch-ua-model": '"K"',
+    "sec-ch-ua-mobile": "maybe",
+  });
+  assert.equal(malformed.platformVersion, null);
+  assert.equal(malformed.model, null);
+  assert.equal(malformed.mobile, null);
+
+  const none = parseClientHints({});
+  assert.equal(none.platform, null);
+  assert.equal(none.platformVersion, null);
+  assert.equal(none.model, null);
+  assert.equal(none.mobile, null);
+});
+
+test("normalizeClientHints sanitizes body supplied hints", () => {
+  const valid = normalizeClientHints({ platform: "Android", platformVersion: "16.0.0", model: "Pixel 9" });
+  assert.equal(valid.platformVersion, "16.0.0");
+  assert.equal(valid.model, "Pixel 9");
+
+  assert.equal(normalizeClientHints(null).platform, null);
+  assert.equal(normalizeClientHints("Android").platformVersion, null);
+  assert.equal(normalizeClientHints({ platformVersion: "not-a-version" }).platformVersion, null);
+  assert.equal(normalizeClientHints({ model: "K" }).model, null);
+  assert.equal(normalizeClientHints({ model: "x".repeat(300) }).model, null);
+});
+
+test("collectClientHints prefers request headers over body hints", () => {
+  const merged = collectClientHints(
+    { platform: "Android", platformVersion: "16.0.0", model: null, mobile: true },
+    { platform: "Android", platformVersion: "10", model: "SpoofedPhone" }
+  );
+  assert.equal(merged.platformVersion, "16.0.0");
+  assert.equal(merged.model, "SpoofedPhone");
+  assert.equal(merged.mobile, true);
+
+  const bodyOnly = collectClientHints({}, { platform: "Android", platformVersion: "15.0.0", model: "Pixel 8" });
+  assert.equal(bodyOnly.platformVersion, "15.0.0");
+  assert.equal(bodyOnly.model, "Pixel 8");
+});
+
+test("sanitizeStoredRequestSignals distrusts legacy versions parsed from reduced UAs", () => {
+  const legacyRow = {
+    userAgent: REDUCED_CHROME_UA,
+    osVersion: "10",
+    osVersionSource: null,
+    deviceModel: null,
+    deviceModelSource: null,
+  };
+  const legacy = sanitizeStoredRequestSignals(legacyRow);
+  assert.equal(legacy.osVersion, null);
+  assert.equal(legacy.osVersionSource, null);
+  assert.equal(legacy.deviceModel, null);
+
+  const trustedRow = {
+    userAgent: REDUCED_CHROME_UA,
+    osVersion: "16.0.0",
+    osVersionSource: "client-hints",
+    deviceModel: "CPH2669",
+    deviceModelSource: "client-hints",
+  };
+  const trusted = sanitizeStoredRequestSignals(trustedRow);
+  assert.equal(trusted.osVersion, "16.0.0");
+  assert.equal(trusted.osVersionSource, "client-hints");
+  assert.equal(trusted.deviceModel, "CPH2669");
+  assert.equal(trusted.deviceModelSource, "client-hints");
+
+  const spoofed = sanitizeStoredRequestSignals({
+    userAgent: REDUCED_CHROME_UA,
+    osVersion: "soon",
+    osVersionSource: "client-hints",
+    deviceModel: "K",
+    deviceModelSource: "client-hints",
+  });
+  assert.equal(spoofed.osVersion, null);
+  assert.equal(spoofed.deviceModel, null);
+
+  const genuine = sanitizeStoredRequestSignals({
+    userAgent: "Mozilla/5.0 (Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0",
+    osVersion: "14",
+    osVersionSource: null,
+    deviceModel: null,
+    deviceModelSource: null,
+  });
+  assert.equal(genuine.osVersion, "14");
+  assert.equal(genuine.osVersionSource, "user-agent");
 });

@@ -1,7 +1,10 @@
 import crypto from "crypto";
 import prisma from "../lib/prisma.js";
 import {
-  parseUserAgent,
+  parseClientHints,
+  collectClientHints,
+  resolveDeviceSignals,
+  sanitizeStoredRequestSignals,
   evaluateRecoveryEligibility,
   sanitizeRegisteredDevice,
   validateDescription,
@@ -16,8 +19,16 @@ const SORTABLE_FIELDS = { createdAt: "createdAt", updatedAt: "updatedAt", status
 
 const generateDeviceToken = () => crypto.randomBytes(32).toString("hex");
 
+const CLIENT_HINT_HEADERS = "Sec-CH-UA-Platform, Sec-CH-UA-Mobile, Sec-CH-UA-Platform-Version, Sec-CH-UA-Model";
+
+const offerClientHints = (res) => {
+  res.setHeader("Accept-CH", CLIENT_HINT_HEADERS);
+  res.setHeader("Vary", "Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version, Sec-CH-UA-Model");
+};
+
 const serializeRequest = (request) => {
   if (!request) return null;
+  const signals = sanitizeStoredRequestSignals(request);
   return {
     id: request.id,
     noteKey: request.noteKey,
@@ -27,7 +38,10 @@ const serializeRequest = (request) => {
     browserName: request.browserName,
     browserVersion: request.browserVersion,
     osName: request.osName,
-    osVersion: request.osVersion,
+    osVersion: signals.osVersion,
+    osVersionSource: signals.osVersionSource,
+    deviceModel: signals.deviceModel,
+    deviceModelSource: signals.deviceModelSource,
     deviceFingerprint: request.deviceFingerprint,
     rejectionReason: request.rejectionReason,
     resolvedBy: request.resolvedBy,
@@ -138,6 +152,8 @@ export const getRecoveryEligibility = async (req, res) => {
     const eligibility = evaluateRecoveryEligibility({ config, entitlement, purchaseOrders: purchases });
     const activeRequest = requests.find((request) => request.status === "PENDING") || null;
 
+    offerClientHints(res);
+
     return res.status(200).json({
       success: true,
       noteKey,
@@ -213,7 +229,8 @@ export const createRecoveryRequest = async (req, res) => {
     }
 
     const userAgent = req.headers["user-agent"] || null;
-    const deviceSignals = parseUserAgent(userAgent);
+    const clientHints = collectClientHints(parseClientHints(req.headers), req.body ? req.body.deviceHints : null);
+    const deviceSignals = resolveDeviceSignals({ userAgent, clientHints });
 
     let request;
     try {
@@ -230,6 +247,9 @@ export const createRecoveryRequest = async (req, res) => {
           browserVersion: deviceSignals.browserVersion,
           osName: deviceSignals.osName,
           osVersion: deviceSignals.osVersion,
+          osVersionSource: deviceSignals.osVersionSource,
+          deviceModel: deviceSignals.deviceModel,
+          deviceModelSource: deviceSignals.deviceModelSource,
           deviceFingerprint: presentedFingerprint.slice(0, 250),
         },
       });
@@ -246,6 +266,8 @@ export const createRecoveryRequest = async (req, res) => {
       }
       throw error;
     }
+
+    offerClientHints(res);
 
     return res.status(201).json({
       success: true,
@@ -360,7 +382,10 @@ export const adminGetRecoveryRequest = async (req, res) => {
 
     const registeredDevice = sanitizeRegisteredDevice(entitlement ? entitlement.registeredDevice : null);
     const purchaseRegistration = events.find((event) => event.eventType === "PURCHASE_DEVICE_REGISTERED") || null;
-    const purchaseDeviceSignals = purchaseRegistration ? parseUserAgent(purchaseRegistration.userAgent) : null;
+    const purchaseDeviceSignals = purchaseRegistration
+      ? resolveDeviceSignals({ userAgent: purchaseRegistration.userAgent })
+      : null;
+    const currentSignals = sanitizeStoredRequestSignals(request);
 
     const boundPurchase =
       request.purchaseOrder ||
@@ -404,6 +429,9 @@ export const adminGetRecoveryRequest = async (req, res) => {
           browserVersion: purchaseDeviceSignals ? purchaseDeviceSignals.browserVersion : null,
           osName: purchaseDeviceSignals ? purchaseDeviceSignals.osName : null,
           osVersion: purchaseDeviceSignals ? purchaseDeviceSignals.osVersion : null,
+          osVersionSource: purchaseDeviceSignals ? purchaseDeviceSignals.osVersionSource : null,
+          deviceModel: purchaseDeviceSignals ? purchaseDeviceSignals.deviceModel : null,
+          deviceModelSource: purchaseDeviceSignals ? purchaseDeviceSignals.deviceModelSource : null,
           fingerprint: purchaseRegistration ? purchaseRegistration.fingerprint : null,
           recordedAt: purchaseRegistration ? purchaseRegistration.createdAt : registeredDevice.registeredAt,
         },
@@ -412,7 +440,10 @@ export const adminGetRecoveryRequest = async (req, res) => {
           browserName: request.browserName,
           browserVersion: request.browserVersion,
           osName: request.osName,
-          osVersion: request.osVersion,
+          osVersion: currentSignals.osVersion,
+          osVersionSource: currentSignals.osVersionSource,
+          deviceModel: currentSignals.deviceModel,
+          deviceModelSource: currentSignals.deviceModelSource,
           fingerprint: request.deviceFingerprint,
           recordedAt: request.createdAt,
         },

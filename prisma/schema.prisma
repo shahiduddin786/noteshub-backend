@@ -159,6 +159,9 @@ model DeviceRecoveryRequest {
   browserVersion    String?
   osName            String?
   osVersion         String?
+  osVersionSource    String?
+  deviceModel       String?
+  deviceModelSource String?
   deviceFingerprint String?
   rejectionReason   String?
   resolvedBy        String?

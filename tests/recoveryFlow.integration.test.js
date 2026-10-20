@@ -16,14 +16,26 @@ const NOTE_A = "mu/sem4/integration-recovery-a";
 const NOTE_B = "mu/sem4/integration-recovery-b";
 const NOTE_C = "mu/sem4/integration-recovery-c";
 const NOTE_D = "mu/sem4/integration-recovery-d";
+const NOTE_E = "mu/sem4/integration-recovery-e";
+const NOTE_F = "mu/sem4/integration-recovery-f";
+const NOTE_G = "mu/sem4/integration-recovery-g";
 
 const TOKEN_A = "registered-token-secret-a";
 const TOKEN_C = "registered-token-secret-c";
 const TOKEN_D = "registered-token-secret-d";
+const TOKEN_E = "registered-token-secret-e";
+const TOKEN_F = "registered-token-secret-f";
+const TOKEN_G = "registered-token-secret-g";
 
 const CURRENT_FP_A = "v2-" + "a".repeat(64);
 const CURRENT_FP_C = "v2-" + "c".repeat(64);
 const CURRENT_FP_D = "v2-" + "d".repeat(64);
+const CURRENT_FP_E = "v2-" + "e".repeat(64);
+const CURRENT_FP_F = "v2-" + "f".repeat(64);
+const CURRENT_FP_G = "v2-" + "g".repeat(64);
+
+const REDUCED_CHROME_ANDROID_UA =
+  "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36";
 
 const state = {};
 
@@ -47,7 +59,7 @@ const call = async (path, { method = "GET", token, admin, body, headers = {} } =
     json = JSON.parse(text);
   } catch {}
 
-  return { status: res.status, json, text };
+  return { status: res.status, json, text, headers: res.headers };
 };
 
 const createSeedUser = async (suffix, noteKey, deviceToken) => {
@@ -135,6 +147,9 @@ maybe("seed: prepares isolated users, notes and purchases", async () => {
 
   state.c = await createSeedUser("c", NOTE_C, TOKEN_C);
   state.d = await createSeedUser("d", NOTE_D, TOKEN_D);
+  state.e = await createSeedUser("e", NOTE_E, TOKEN_E);
+  state.f = await createSeedUser("f", NOTE_F, TOKEN_F);
+  state.g = await createSeedUser("g", NOTE_G, TOKEN_G);
 
   assert.ok(state.a.token);
   assert.ok(state.c.token);
@@ -240,6 +255,93 @@ maybe("repeated submissions trigger rate limiting", async () => {
   }
 
   assert.ok(statuses.includes(429), `expected a 429 among ${statuses.join(",")}`);
+});
+
+maybe("eligibility responses advertise User-Agent Client Hints opt-in", async () => {
+  const res = await call(`/api/paid-notes/recovery/eligibility/${NOTE_A}`, { token: state.a.token });
+
+  assert.equal(res.status, 200);
+  const acceptCh = res.headers.get("accept-ch") || "";
+  assert.ok(acceptCh.includes("Sec-CH-UA-Platform-Version"), `Accept-CH missing platform version: ${acceptCh}`);
+  assert.ok(acceptCh.includes("Sec-CH-UA-Model"), `Accept-CH missing model: ${acceptCh}`);
+});
+
+maybe("submission with Client Hints records the real Android version and model", async () => {
+  const res = await call("/api/paid-notes/recovery/request", {
+    method: "POST",
+    token: state.e.token,
+    body: {
+      noteKey: NOTE_E,
+      description: "Cleared Chrome data on my OnePlus Nord 5 running Android 16 and lost access.",
+    },
+    headers: {
+      "x-device-fingerprint": CURRENT_FP_E,
+      "user-agent": REDUCED_CHROME_ANDROID_UA,
+      "sec-ch-ua-platform": '"Android"',
+      "sec-ch-ua-platform-version": '"16.0.0"',
+      "sec-ch-ua-model": '"CPH2669"',
+      "sec-ch-ua-mobile": "?1",
+    },
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(res.json.request.osName, "Android");
+  assert.equal(res.json.request.osVersion, "16.0.0");
+  assert.equal(res.json.request.osVersionSource, "client-hints");
+  assert.equal(res.json.request.deviceModel, "CPH2669");
+  assert.equal(res.json.request.deviceModelSource, "client-hints");
+  assert.notEqual(res.json.request.osVersion, "10");
+
+  const detail = await call(`/api/paid-notes/admin/recovery/${res.json.request.id}`, { admin: ADMIN });
+  assert.equal(detail.status, 200);
+  assert.equal(detail.json.comparison.currentTime.osVersion, "16.0.0");
+  assert.equal(detail.json.comparison.currentTime.deviceModel, "CPH2669");
+});
+
+maybe("reduced User-Agent without Client Hints stores no Android version or model", async () => {
+  const res = await call("/api/paid-notes/recovery/request", {
+    method: "POST",
+    token: state.f.token,
+    body: {
+      noteKey: NOTE_F,
+      description: "Chrome blocks the note with a device error after my profile reset.",
+    },
+    headers: {
+      "x-device-fingerprint": CURRENT_FP_F,
+      "user-agent": REDUCED_CHROME_ANDROID_UA,
+    },
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(res.json.request.osName, "Android");
+  assert.equal(res.json.request.osVersion, null);
+  assert.equal(res.json.request.deviceModel, null);
+
+  const detail = await call(`/api/paid-notes/admin/recovery/${res.json.request.id}`, { admin: ADMIN });
+  assert.equal(detail.status, 200);
+  assert.equal(detail.json.comparison.currentTime.osVersion, null);
+  assert.equal(detail.json.comparison.currentTime.deviceModel, null);
+});
+
+maybe("body supplied device hints are used when request headers are absent", async () => {
+  const res = await call("/api/paid-notes/recovery/request", {
+    method: "POST",
+    token: state.g.token,
+    body: {
+      noteKey: NOTE_G,
+      description: "Reinstalled my browser profile and lost the saved device authorization.",
+      deviceHints: { platform: "Android", platformVersion: "15.0.0", model: "Pixel 8" },
+    },
+    headers: {
+      "x-device-fingerprint": CURRENT_FP_G,
+      "user-agent": REDUCED_CHROME_ANDROID_UA,
+    },
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(res.json.request.osVersion, "15.0.0");
+  assert.equal(res.json.request.osVersionSource, "client-hints");
+  assert.equal(res.json.request.deviceModel, "Pixel 8");
 });
 
 maybe("ordinary users cannot reach admin recovery endpoints", async () => {
