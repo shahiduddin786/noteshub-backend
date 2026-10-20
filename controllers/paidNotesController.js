@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { v2 as cloudinary } from "cloudinary";
 import prisma from "../lib/prisma.js";
+import { evaluateDeviceAccess } from "../utils/deviceAccess.js";
 
 const generateDeviceToken = () => crypto.randomBytes(32).toString("hex");
 
@@ -234,6 +235,7 @@ export const checkEntitlement = async (req, res) => {
     const userId = req.userId;
     const deviceToken = req.headers["x-device-token"];
     const deviceFingerprint = req.headers["x-device-fingerprint"];
+    const legacyFingerprint = req.headers["x-device-fingerprint-legacy"];
 
     if (!noteKey) {
       return res.status(400).json({ success: false, message: "noteKey is required" });
@@ -252,26 +254,13 @@ export const checkEntitlement = async (req, res) => {
       return res.status(403).json({ success: false, message: "Device not authorized" });
     }
 
-    if (!deviceToken) {
-      if (!deviceFingerprint || entitlement.registeredDevice.fingerprint !== deviceFingerprint) {
-        return res.status(403).json({ success: false, message: "Device not authorized" });
-      }
-      await prisma.registeredDevice.update({
-        where: { entitlementId: entitlement.id },
-        data: { lastSeenAt: new Date() },
-      });
-      return res.status(200).json({
-        success: true,
-        hasAccess: true,
-        deviceToken: entitlement.registeredDevice.deviceToken,
-      });
-    }
+    const access = evaluateDeviceAccess(entitlement.registeredDevice, {
+      deviceToken,
+      fingerprint: deviceFingerprint,
+      legacyFingerprint,
+    });
 
-    if (entitlement.registeredDevice.deviceToken !== deviceToken) {
-      return res.status(403).json({ success: false, message: "Device not authorized" });
-    }
-
-    if (deviceFingerprint && entitlement.registeredDevice.fingerprint !== deviceFingerprint) {
+    if (access.status !== "authorized") {
       return res.status(403).json({ success: false, message: "Device not authorized" });
     }
 
@@ -280,7 +269,13 @@ export const checkEntitlement = async (req, res) => {
       data: { lastSeenAt: new Date() },
     });
 
-    return res.status(200).json({ success: true, hasAccess: true });
+    return res.status(200).json({
+      success: true,
+      hasAccess: true,
+      // Returned when access was re-bound via fingerprint match so the
+      // client can persist the token again.
+      ...(access.issueToken ? { deviceToken: access.issueToken } : {}),
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server error" });
   }
@@ -291,6 +286,7 @@ export const getSignedAccess = async (req, res) => {
     const noteKey = req.params[0];
     const userId = req.userId;
     const deviceFingerprint = req.headers["x-device-fingerprint"];
+    const legacyFingerprint = req.headers["x-device-fingerprint-legacy"];
 
     if (!noteKey) {
       return res.status(400).json({ success: false, message: "noteKey is required" });
@@ -323,11 +319,13 @@ export const getSignedAccess = async (req, res) => {
       return res.status(403).json({ success: false, message: "Device not authorized" });
     }
 
-    if (entitlement.registeredDevice.deviceToken !== deviceToken) {
-      return res.status(403).json({ success: false, message: "Device not authorized" });
-    }
+    const access = evaluateDeviceAccess(entitlement.registeredDevice, {
+      deviceToken,
+      fingerprint: deviceFingerprint,
+      legacyFingerprint,
+    });
 
-    if (deviceFingerprint && entitlement.registeredDevice.fingerprint !== deviceFingerprint) {
+    if (access.status !== "authorized") {
       return res.status(403).json({ success: false, message: "Device not authorized" });
     }
 
@@ -423,6 +421,7 @@ export const streamPaidFile = async (req, res) => {
     const userId = req.userId;
     const deviceToken = req.headers["x-device-token"];
     const deviceFingerprint = req.headers["x-device-fingerprint"];
+    const legacyFingerprint = req.headers["x-device-fingerprint-legacy"];
 
     if (!noteKey || !fileName || !deviceToken) {
       return res.status(400).json({ success: false, message: "Missing required params" });
@@ -440,8 +439,16 @@ export const streamPaidFile = async (req, res) => {
 
     if (!entitlement) return res.status(403).json({ success: false, message: "No entitlement" });
     if (!entitlement.registeredDevice) return res.status(403).json({ success: false, message: "Device not authorized" });
-    if (entitlement.registeredDevice.deviceToken !== deviceToken) return res.status(403).json({ success: false, message: "Device not authorized" });
-    if (deviceFingerprint && entitlement.registeredDevice.fingerprint !== deviceFingerprint) return res.status(403).json({ success: false, message: "Device not authorized" });
+
+    const access = evaluateDeviceAccess(entitlement.registeredDevice, {
+      deviceToken,
+      fingerprint: deviceFingerprint,
+      legacyFingerprint,
+    });
+
+    if (access.status !== "authorized") {
+      return res.status(403).json({ success: false, message: "Device not authorized" });
+    }
 
     await prisma.registeredDevice.update({
       where: { entitlementId: entitlement.id },
