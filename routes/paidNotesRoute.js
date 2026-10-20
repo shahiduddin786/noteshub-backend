@@ -16,6 +16,20 @@ import {
   adminListPurchases,
   adminResetDevice,
 } from "../controllers/paidNotesController.js";
+import {
+  getRecoveryEligibility,
+  createRecoveryRequest,
+  adminListRecoveryRequests,
+  adminGetRecoveryRequest,
+  adminApproveRecoveryRequest,
+  adminRejectRecoveryRequest,
+  adminResendRecoveryNotification,
+} from "../controllers/deviceRecoveryController.js";
+import {
+  recoveryRequestSchema,
+  recoveryRejectSchema,
+  validate,
+} from "../validators/recoveryValidate.js";
 
 const router = express.Router();
 
@@ -26,6 +40,15 @@ router.post("/purchase/verify", isAuthenticated, verifyPurchase);
 router.get("/entitlement/*", isAuthenticated, checkEntitlement);
 router.get("/access/*", isAuthenticated, getSignedAccess);
 router.get("/stream/*/file/:fileName", isAuthenticated, streamPaidFile);
+
+router.get("/recovery/eligibility/*", isAuthenticated, getRecoveryEligibility);
+router.post("/recovery/request", isAuthenticated, validate(recoveryRequestSchema), createRecoveryRequest);
+
+router.get("/admin/recovery", isAdmin, adminListRecoveryRequests);
+router.get("/admin/recovery/:id", isAdmin, adminGetRecoveryRequest);
+router.post("/admin/recovery/:id/approve", isAdmin, adminApproveRecoveryRequest);
+router.post("/admin/recovery/:id/reject", isAdmin, validate(recoveryRejectSchema), adminRejectRecoveryRequest);
+router.post("/admin/recovery/:id/resend-notification", isAdmin, adminResendRecoveryNotification);
 
 router.get("/admin/list", isAdmin, adminListPaidNotes);
 router.post("/admin/create", isAdmin, adminCreatePaidNote);

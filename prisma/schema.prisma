@@ -22,10 +22,15 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  profilePhotoUrl      String?
+  profilePhotoPublicId String?
+
   sessions         Session[]
   donations        Donation[]
   purchaseOrders   PurchaseOrder[]
   entitlements     NoteEntitlement[]
+  recoveryRequests DeviceRecoveryRequest[]
+  deviceAuthEvents DeviceAuthEvent[]
 }
 
 model Session {
@@ -93,6 +98,9 @@ model PaidNoteConfig {
 
   purchaseOrders  PurchaseOrder[]
   entitlements    NoteEntitlement[]
+
+  recoveryRequests DeviceRecoveryRequest[]
+  deviceAuthEvents DeviceAuthEvent[]
 }
 
 model PurchaseOrder {
@@ -109,6 +117,8 @@ model PurchaseOrder {
 
   user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   config PaidNoteConfig @relation(fields: [noteKey], references: [noteKey], onDelete: Cascade)
+
+  recoveryRequests DeviceRecoveryRequest[]
 }
 
 model NoteEntitlement {
@@ -134,4 +144,70 @@ model RegisteredDevice {
   resetAt       DateTime?
 
   entitlement NoteEntitlement @relation(fields: [entitlementId], references: [id], onDelete: Cascade)
+}
+
+model DeviceRecoveryRequest {
+  id                String    @id @default(cuid())
+  userId            String
+  noteKey           String
+  purchaseOrderId   String?
+  status            String    @default("PENDING")
+  activeMarker      String?
+  description       String
+  userAgent         String?
+  browserName       String?
+  browserVersion    String?
+  osName            String?
+  osVersion         String?
+  deviceFingerprint String?
+  rejectionReason   String?
+  resolvedBy        String?
+  resolvedAt        DateTime?
+  emailSentAt       DateTime?
+  emailAttempts     Int       @default(0)
+  emailLastError    String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  config        PaidNoteConfig @relation(fields: [noteKey], references: [noteKey], onDelete: Cascade)
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, noteKey, activeMarker])
+  @@index([status, createdAt])
+}
+
+model DeviceAuthEvent {
+  id            String   @id @default(cuid())
+  userId        String
+  noteKey       String?
+  entitlementId String?
+  eventType     String
+  actor         String   @default("system")
+  detail        String?
+  userAgent     String?
+  fingerprint   String?
+  createdAt     DateTime @default(now())
+
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  config PaidNoteConfig? @relation(fields: [noteKey], references: [noteKey], onDelete: SetNull)
+
+  @@index([userId, noteKey, createdAt])
+}
+
+model NoteAsset {
+  id        String   @id
+  provider  String
+  publicId  String
+  filename  String
+  folder    String
+  bytes     Int?
+  version   String?
+  hash      String?
+  url       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@unique([provider, publicId])
+  @@index([folder])
 }

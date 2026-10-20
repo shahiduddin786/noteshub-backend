@@ -221,6 +221,22 @@ export const verifyPurchase = async (req, res) => {
           deviceToken: newDeviceToken,
         },
       });
+
+      await tx.deviceAuthEvent.create({
+        data: {
+          userId,
+          noteKey: order.noteKey,
+          entitlementId: entitlement.id,
+          eventType: "PURCHASE_DEVICE_REGISTERED",
+          actor: "user",
+          detail: JSON.stringify({
+            razorpayOrderId: razorpay_order_id,
+            razorpayPaymentId: razorpay_payment_id,
+          }),
+          userAgent: req.headers["user-agent"] || null,
+          fingerprint: deviceFingerprint,
+        },
+      });
     });
 
     return res.status(200).json({ success: true, message: "Purchase verified. Access granted.", deviceToken: newDeviceToken });
@@ -642,6 +658,19 @@ export const adminResetDevice = async (req, res) => {
 
     await prisma.registeredDevice.delete({
       where: { entitlementId: entitlement.id },
+    });
+
+    await prisma.deviceAuthEvent.create({
+      data: {
+        userId,
+        noteKey,
+        entitlementId: entitlement.id,
+        eventType: "ADMIN_DEVICE_RESET",
+        actor: String(req.headers.username || "admin"),
+        detail: JSON.stringify({ action: "device_reset" }),
+        userAgent: req.headers["user-agent"] || null,
+        fingerprint: entitlement.registeredDevice.fingerprint,
+      },
     });
 
     return res.status(200).json({ success: true, message: "Device reset. User can re-register on next purchase view." });
