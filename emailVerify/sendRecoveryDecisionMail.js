@@ -28,13 +28,12 @@ const approvedBody = ({ username, noteTitle, reference, resolvedAt }) => `
     <p style="margin:0;color:#166534;font-size:14px;font-weight:bold">How to reopen your notes</p>
     <p style="margin:6px 0 0;color:#166534;font-size:13px">
       Open NotesHub in this browser, go back to the paid note and open it as usual.
-      Your existing purchase is still valid — you do not need to pay again.
+      Your existing purchase is still valid, you do not need to pay again.
     </p>
   </div>
-  <p style="color:#334155;font-size:13px">Request reference: <b>${escapeHtml(reference)}</b></p>
   <p style="color:#334155;font-size:13px">Resolved on: ${escapeHtml(resolvedAt)}</p>
   <p style="color:#334155;font-size:13px">
-    If you still cannot open the note, please contact us from the Contact page.
+    If you still cannot open the note, please contact us from the <a href="https://noteshub-app.onrender.com/contact" style="color:#0A58CA;text-decoration:none">Contact page</a>.
   </p>
 `;
 
@@ -48,7 +47,6 @@ const rejectedBody = ({ username, noteTitle, reference, reason, resolvedAt }) =>
     <p style="margin:0;color:#991b1b;font-size:14px;font-weight:bold">Reason</p>
     <p style="margin:6px 0 0;color:#991b1b;font-size:13px">${escapeHtml(reason)}</p>
   </div>
-  <p style="color:#334155;font-size:13px">Request reference: <b>${escapeHtml(reference)}</b></p>
   <p style="color:#334155;font-size:13px">Resolved on: <b>${escapeHtml(resolvedAt)}</b></p>
   <p style="color:#334155;font-size:13px">
     If you believe this decision is a mistake, you can submit a new request from the
@@ -71,8 +69,8 @@ export const sendRecoveryDecisionMail = async ({
 
   const approved = status === "APPROVED";
   const subject = approved
-    ? `Device recovery approved - access restored (${reference})`
-    : `Device recovery request rejected (${reference})`;
+    ? `Device recovery approved - access restored`
+    : `Device recovery request rejected`;
 
   const body = approved
     ? approvedBody({ username, noteTitle, reference, resolvedAt })

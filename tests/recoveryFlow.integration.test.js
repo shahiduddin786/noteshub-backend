@@ -212,7 +212,7 @@ maybe("purchaser submits a device recovery request", async () => {
     body: {
       noteKey: NOTE_A,
       description:
-        "I purchased these notes on my OnePlus Nord 5, but after clearing Chrome data, NotesHub says they were purchased on another device.",
+        "I purchased these notes on my this device, but after clearing Chrome data, NotesHub says they were purchased on another device.",
     },
     headers: { "x-device-fingerprint": CURRENT_FP_A },
   });
@@ -272,7 +272,7 @@ maybe("submission with Client Hints records the real Android version and model",
     token: state.e.token,
     body: {
       noteKey: NOTE_E,
-      description: "Cleared Chrome data on my OnePlus Nord 5 running Android 16 and lost access.",
+      description: "Cleared Chrome data on my device running Android 16 and lost access.",
     },
     headers: {
       "x-device-fingerprint": CURRENT_FP_E,
@@ -389,7 +389,7 @@ maybe("admin can inspect purchase and device history without secret leakage", as
   assert.equal(res.json.registeredDevice.fingerprint, state.a.registeredDevice.fingerprint);
   assert.equal(res.json.comparison.fingerprintMatch, false);
   assert.ok(Array.isArray(res.json.events));
-  assert.ok(res.json.request.description.includes("OnePlus Nord 5"));
+  assert.ok(res.json.request.description.includes("this device"));
 
   assert.equal(res.text.includes(TOKEN_A), false);
   assert.equal(res.text.includes('"deviceToken":'), false);
