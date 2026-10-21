@@ -4,6 +4,13 @@ import { createClient } from "@supabase/supabase-js";
 import { v2 as cloudinary } from "cloudinary";
 import prisma from "../lib/prisma.js";
 import { evaluateDeviceAccess } from "../utils/deviceAccess.js";
+import {
+  checkCouponForPurchase,
+  claimCouponHold,
+  attachCouponHold,
+  releaseCouponHold,
+  redeemCouponForOrder,
+} from "./couponController.js";
 
 const generateDeviceToken = () => crypto.randomBytes(32).toString("hex");
 
@@ -105,7 +112,7 @@ export const getPaidNoteConfig = async (req, res) => {
 
 export const createPurchaseOrder = async (req, res) => {
   try {
-    const { noteKey } = req.body;
+    const { noteKey, couponCode } = req.body;
     const userId = req.userId;
 
     if (!noteKey) {
@@ -128,24 +135,53 @@ export const createPurchaseOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: "You already own this note" });
     }
 
-    const amountInPaise = config.price * 100;
+    let coupon = null;
+    if (couponCode) {
+      const check = await checkCouponForPurchase({ code: couponCode, userId, noteKey });
+      if (!check.valid) {
+        return res.status(400).json({ success: false, message: check.message });
+      }
+      const claimed = await claimCouponHold(check.code);
+      if (!claimed) {
+        return res.status(409).json({
+          success: false,
+          message: "This coupon is currently being used for another purchase. Please try again shortly.",
+        });
+      }
+      coupon = check;
+    }
 
-    const order = await razorpay.orders.create({
-      amount: amountInPaise,
-      currency: "INR",
-      receipt: `pnote_${Date.now()}`,
-    });
+    const amountInPaise = coupon ? coupon.finalPricePaise : config.price * 100;
 
-    await prisma.purchaseOrder.create({
-      data: {
-        userId,
-        noteKey,
-        razorpayOrderId: order.id,
+    let order;
+    try {
+      order = await razorpay.orders.create({
         amount: amountInPaise,
         currency: "INR",
-        status: "created",
-      },
-    });
+        receipt: `pnote_${Date.now()}`,
+      });
+
+      await prisma.purchaseOrder.create({
+        data: {
+          userId,
+          noteKey,
+          razorpayOrderId: order.id,
+          amount: amountInPaise,
+          currency: "INR",
+          status: "created",
+          couponCode: coupon ? coupon.code : null,
+        },
+      });
+
+      if (coupon) {
+        await attachCouponHold(coupon.code, order.id);
+      }
+    } catch (orderError) {
+      if (coupon) {
+        await releaseCouponHold(coupon.code, "pending").catch(() => {});
+      }
+      throw orderError;
+    }
 
     return res.status(200).json({
       success: true,
@@ -154,6 +190,17 @@ export const createPurchaseOrder = async (req, res) => {
       currency: "INR",
       keyId: process.env.RAZORPAY_KEY_ID,
       noteTitle: config.title,
+      ...(coupon
+        ? {
+            coupon: {
+              code: coupon.code,
+              discountPercent: coupon.discountPercent,
+              originalPricePaise: coupon.originalPricePaise,
+              discountAmountPaise: coupon.discountAmountPaise,
+              finalPricePaise: coupon.finalPricePaise,
+            },
+          }
+        : {}),
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Failed to create order" });
@@ -199,6 +246,9 @@ export const verifyPurchase = async (req, res) => {
         where: { razorpayOrderId: razorpay_order_id },
         data: { razorpayPaymentId: razorpay_payment_id, status: "captured" },
       });
+      if (order.couponCode) {
+        await releaseCouponHold(order.couponCode, razorpay_order_id).catch(() => {});
+      }
       return res.status(200).json({ success: true, message: "Already owns this note" });
     }
 
@@ -209,6 +259,28 @@ export const verifyPurchase = async (req, res) => {
         where: { razorpayOrderId: razorpay_order_id },
         data: { razorpayPaymentId: razorpay_payment_id, status: "captured" },
       });
+
+      let couponRedeemed = null;
+      if (order.couponCode) {
+        couponRedeemed = await redeemCouponForOrder(tx, order.couponCode, razorpay_order_id);
+        if (!couponRedeemed) {
+          await tx.deviceAuthEvent.create({
+            data: {
+              userId,
+              noteKey: order.noteKey,
+              eventType: "COUPON_REDEEM_SKIPPED",
+              actor: "system",
+              detail: JSON.stringify({
+                razorpayOrderId: razorpay_order_id,
+                couponCode: order.couponCode,
+                reason: "Coupon was not redeemable at verification time",
+              }),
+              userAgent: req.headers["user-agent"] || null,
+              fingerprint: deviceFingerprint,
+            },
+          });
+        }
+      }
 
       const entitlement = await tx.noteEntitlement.create({
         data: { userId, noteKey: order.noteKey },
@@ -232,6 +304,9 @@ export const verifyPurchase = async (req, res) => {
           detail: JSON.stringify({
             razorpayOrderId: razorpay_order_id,
             razorpayPaymentId: razorpay_payment_id,
+            ...(order.couponCode
+              ? { couponCode: order.couponCode, couponRedeemed: !!couponRedeemed }
+              : {}),
           }),
           userAgent: req.headers["user-agent"] || null,
           fingerprint: deviceFingerprint,

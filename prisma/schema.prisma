@@ -31,6 +31,7 @@ model User {
   entitlements     NoteEntitlement[]
   recoveryRequests DeviceRecoveryRequest[]
   deviceAuthEvents DeviceAuthEvent[]
+  coupons          Coupon[]
 }
 
 model Session {
@@ -98,6 +99,7 @@ model PaidNoteConfig {
 
   purchaseOrders  PurchaseOrder[]
   entitlements    NoteEntitlement[]
+  coupons         Coupon[]
 
   recoveryRequests DeviceRecoveryRequest[]
   deviceAuthEvents DeviceAuthEvent[]
@@ -112,6 +114,7 @@ model PurchaseOrder {
   amount            Int
   currency          String    @default("INR")
   status            String    @default("created")
+  couponCode        String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -119,6 +122,34 @@ model PurchaseOrder {
   config PaidNoteConfig @relation(fields: [noteKey], references: [noteKey], onDelete: Cascade)
 
   recoveryRequests DeviceRecoveryRequest[]
+
+  @@index([couponCode])
+}
+
+model Coupon {
+  id              String    @id @default(cuid())
+  code            String    @unique
+  userId          String?
+  recipientName   String
+  recipientEmail  String
+  recipientPhone  String?
+  noteKey         String
+  discountPercent Int
+  status          String    @default("active")
+  expiresAt       DateTime
+  heldOrderId     String?
+  heldUntil       DateTime?
+  redeemedAt      DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user   User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  config PaidNoteConfig @relation(fields: [noteKey], references: [noteKey], onDelete: Cascade)
+
+  @@index([noteKey])
+  @@index([userId])
+  @@index([recipientEmail])
 }
 
 model NoteEntitlement {

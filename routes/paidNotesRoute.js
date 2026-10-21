@@ -26,10 +26,21 @@ import {
   adminResendRecoveryNotification,
 } from "../controllers/deviceRecoveryController.js";
 import {
+  validateCoupon,
+  getEligibleCoupon,
+  adminCreateCoupon,
+  adminListCoupons,
+  adminRevokeCoupon,
+} from "../controllers/couponController.js";
+import {
   recoveryRequestSchema,
   recoveryRejectSchema,
   validate,
 } from "../validators/recoveryValidate.js";
+import {
+  couponApplySchema,
+  couponCreateSchema,
+} from "../validators/couponValidate.js";
 
 const router = express.Router();
 
@@ -37,6 +48,8 @@ router.get("/config/*", getPaidNoteConfig);
 router.get("/files/*", getPaidNoteFileList);
 router.post("/purchase/create-order", isAuthenticated, createPurchaseOrder);
 router.post("/purchase/verify", isAuthenticated, verifyPurchase);
+router.post("/coupons/validate", isAuthenticated, validate(couponApplySchema), validateCoupon);
+router.get("/coupons/eligible/*", isAuthenticated, getEligibleCoupon);
 router.get("/entitlement/*", isAuthenticated, checkEntitlement);
 router.get("/access/*", isAuthenticated, getSignedAccess);
 router.get("/stream/*/file/:fileName", isAuthenticated, streamPaidFile);
@@ -56,5 +69,9 @@ router.put("/admin/update/:noteKey", isAdmin, adminUpdatePaidNote);
 router.delete("/admin/delete/:noteKey", isAdmin, adminDeletePaidNote);
 router.get("/admin/purchases", isAdmin, adminListPurchases);
 router.post("/admin/reset-device", isAdmin, adminResetDevice);
+
+router.get("/admin/coupons", isAdmin, adminListCoupons);
+router.post("/admin/coupons", isAdmin, validate(couponCreateSchema), adminCreateCoupon);
+router.post("/admin/coupons/:id/revoke", isAdmin, adminRevokeCoupon);
 
 export default router;
