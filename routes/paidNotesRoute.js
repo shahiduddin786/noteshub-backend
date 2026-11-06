@@ -4,6 +4,7 @@ import { isAdmin } from "../middleware/isAdmin.js";
 import {
   getPaidNoteConfig,
   getPaidNoteFileList,
+  getImportantNotes,
   createPurchaseOrder,
   verifyPurchase,
   checkEntitlement,
@@ -44,6 +45,7 @@ import {
 
 const router = express.Router();
 
+router.get("/important", getImportantNotes);
 router.get("/config/*", getPaidNoteConfig);
 router.get("/files/*", getPaidNoteFileList);
 router.post("/purchase/create-order", isAuthenticated, createPurchaseOrder);

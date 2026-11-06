@@ -26,6 +26,19 @@ const supabase = createClient(
 
 const SIGNED_URL_EXPIRY_SECONDS = 900;
 
+export const getImportantNotes = async (req, res) => {
+  try {
+    const configs = await prisma.paidNoteConfig.findMany({
+      where: { isEnabled: true, isImportant: true },
+      orderBy: { noteKey: "asc" },
+      select: { noteKey: true, title: true, price: true },
+    });
+    return res.status(200).json({ success: true, notes: configs });
+  } catch {
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 export const getPaidNoteFileList = async (req, res) => {
   try {
     const noteKey = req.params[0];
@@ -658,7 +671,7 @@ export const streamPaidFile = async (req, res) => {
 
 export const adminCreatePaidNote = async (req, res) => {
   try {
-    const { noteKey, title, price, isEnabled } = req.body;
+    const { noteKey, title, price, isEnabled, isImportant } = req.body;
 
     if (!noteKey || !title || price === undefined) {
       return res.status(400).json({ success: false, message: "noteKey, title, and price are required" });
@@ -680,6 +693,7 @@ export const adminCreatePaidNote = async (req, res) => {
         title,
         price: parsedPrice,
         isEnabled: isEnabled !== undefined ? Boolean(isEnabled) : true,
+        isImportant: isImportant !== undefined ? Boolean(isImportant) : false,
       },
     });
 
@@ -692,7 +706,7 @@ export const adminCreatePaidNote = async (req, res) => {
 export const adminUpdatePaidNote = async (req, res) => {
   try {
     const { noteKey } = req.params;
-    const { title, price, isEnabled } = req.body;
+    const { title, price, isEnabled, isImportant } = req.body;
 
     const updateData = {};
     if (title !== undefined) updateData.title = title;
@@ -704,6 +718,7 @@ export const adminUpdatePaidNote = async (req, res) => {
       updateData.price = parsedPrice;
     }
     if (isEnabled !== undefined) updateData.isEnabled = Boolean(isEnabled);
+    if (isImportant !== undefined) updateData.isImportant = Boolean(isImportant);
 
     const config = await prisma.paidNoteConfig.update({
       where: { noteKey },

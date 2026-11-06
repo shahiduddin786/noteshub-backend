@@ -18,6 +18,7 @@ const allowedOrigins = [
   "https://noteshub-admin.vercel.app",
   "http://localhost:5173",
   "http://localhost:5174",
+  "http://localhost:5175",
   // Local Expo / Metro bundlers (web + devtools). Native apps don't send
   // Origin, so these entries only affect browser-based development.
   "http://localhost:8081",
