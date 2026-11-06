@@ -66,12 +66,16 @@ export const googleWebCallback = async (req, res) => {
     await prisma.session.create({ data: { userId: user.id } });
 
     const token = jwt.sign({ id: user.id }, process.env.SECRET_KEY, { expiresIn: "10d" });
+    // Same refresh-token contract as the password login so Google sessions
+    // can be renewed instead of dying with the 10-day access token.
+    const refreshToken = jwt.sign({ id: user.id }, process.env.SECRET_KEY, { expiresIn: "30d" });
 
     await prisma.user.update({ where: { id: user.id }, data: { isLoggedIn: true } });
 
     return res.status(200).json({
       success: true,
       token,
+      refreshToken,
       user: {
         id: user.id,
         username: user.username,
