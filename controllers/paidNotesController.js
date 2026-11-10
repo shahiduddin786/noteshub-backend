@@ -26,19 +26,6 @@ const supabase = createClient(
 
 const SIGNED_URL_EXPIRY_SECONDS = 900;
 
-export const getImportantNotes = async (req, res) => {
-  try {
-    const configs = await prisma.paidNoteConfig.findMany({
-      where: { isEnabled: true, isImportant: true },
-      orderBy: { noteKey: "asc" },
-      select: { noteKey: true, title: true, price: true },
-    });
-    return res.status(200).json({ success: true, notes: configs });
-  } catch {
-    return res.status(500).json({ success: false, message: "Server error" });
-  }
-};
-
 export const getPaidNoteFileList = async (req, res) => {
   try {
     const noteKey = req.params[0];
@@ -49,6 +36,10 @@ export const getPaidNoteFileList = async (req, res) => {
     const config = await prisma.paidNoteConfig.findUnique({ where: { noteKey } });
     if (!config || !config.isEnabled) {
       return res.status(404).json({ success: false, message: "Not found" });
+    }
+
+    if (config.isFreeMode) {
+      return res.status(403).json({ success: false, message: "Not available as paid note" });
     }
 
     const cloudinaryFolder = `noteshub/${noteKey}`;
@@ -91,12 +82,7 @@ export const getPaidNoteFileList = async (req, res) => {
       price: config.price,
       files,
     });
-  } catch (error) {
-    console.error("[paid-notes] file-list failed:", {
-      noteKey: req.params[0],
-      code: error?.code || null,
-      message: error?.message,
-    });
+  } catch {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
@@ -116,19 +102,19 @@ export const getPaidNoteConfig = async (req, res) => {
       return res.status(404).json({ success: false, message: "Paid note config not found" });
     }
 
+    if (config.isFreeMode) {
+      return res.status(200).json({ success: false, isFreeMode: true });
+    }
+
     return res.status(200).json({
       success: true,
       noteKey: config.noteKey,
       title: config.title,
       price: config.price,
       isEnabled: config.isEnabled,
+      isFreeMode: false,
     });
   } catch (error) {
-    console.error("[paid-notes] config lookup failed:", {
-      noteKey: req.params[0],
-      code: error?.code || null,
-      message: error?.message,
-    });
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
@@ -226,25 +212,6 @@ export const createPurchaseOrder = async (req, res) => {
         : {}),
     });
   } catch (error) {
-    // Never log the request payload or credentials — only enough context to
-    // tell a database failure apart from a Razorpay failure.
-    const providerFailure = Boolean(error?.statusCode || error?.error);
-    console.error("[paid-notes] create-order failed:", {
-      userId: req.userId,
-      noteKey: req.body?.noteKey,
-      providerFailure,
-      code: error?.code || null,
-      statusCode: error?.statusCode || null,
-      message: error?.message,
-    });
-
-    if (providerFailure) {
-      return res.status(502).json({
-        success: false,
-        message: "Could not reach the payment provider. Please try again.",
-      });
-    }
-
     return res.status(500).json({ success: false, message: "Failed to create order" });
   }
 };
@@ -358,14 +325,6 @@ export const verifyPurchase = async (req, res) => {
 
     return res.status(200).json({ success: true, message: "Purchase verified. Access granted.", deviceToken: newDeviceToken });
   } catch (error) {
-    // Do not log signature or payment-id material — order id + error cause
-    // are enough to diagnose a failed verification.
-    console.error("[paid-notes] purchase verify failed:", {
-      userId: req.userId,
-      razorpayOrderId: req.body?.razorpay_order_id || null,
-      code: error?.code || null,
-      message: error?.message,
-    });
     return res.status(500).json({ success: false, message: "Verification error" });
   }
 };
@@ -418,12 +377,6 @@ export const checkEntitlement = async (req, res) => {
       ...(access.issueToken ? { deviceToken: access.issueToken } : {}),
     });
   } catch (error) {
-    console.error("[paid-notes] entitlement check failed:", {
-      userId: req.userId,
-      noteKey: req.params[0],
-      code: error?.code || null,
-      message: error?.message,
-    });
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
@@ -445,6 +398,10 @@ export const getSignedAccess = async (req, res) => {
 
     if (!config || !config.isEnabled) {
       return res.status(404).json({ success: false, message: "Note not found" });
+    }
+
+    if (config.isFreeMode) {
+      return res.status(403).json({ success: false, message: "Not available as paid note" });
     }
 
     const deviceToken = req.headers["x-device-token"];
@@ -558,12 +515,6 @@ export const getSignedAccess = async (req, res) => {
       files: validFiles,
     });
   } catch (error) {
-    console.error("[paid-notes] signed-access failed:", {
-      userId: req.userId,
-      noteKey: req.params[0],
-      code: error?.code || null,
-      message: error?.message,
-    });
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };  
@@ -583,6 +534,10 @@ export const streamPaidFile = async (req, res) => {
     const config = await prisma.paidNoteConfig.findUnique({ where: { noteKey } });
     if (!config || !config.isEnabled) {
       return res.status(404).json({ success: false, message: "Note not found" });
+    }
+
+    if (config.isFreeMode) {
+      return res.status(403).json({ success: false, message: "Not available as paid note" });
     }
 
     const entitlement = await prisma.noteEntitlement.findUnique({
@@ -658,20 +613,14 @@ export const streamPaidFile = async (req, res) => {
 
     const buffer = await upstream.arrayBuffer();
     return res.send(Buffer.from(buffer));
-  } catch (error) {
-    console.error("[paid-notes] stream failed:", {
-      userId: req.userId,
-      noteKey: req.params[0],
-      code: error?.code || null,
-      message: error?.message,
-    });
+  } catch {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
 export const adminCreatePaidNote = async (req, res) => {
   try {
-    const { noteKey, title, price, isEnabled, isImportant } = req.body;
+    const { noteKey, title, price, isEnabled } = req.body;
 
     if (!noteKey || !title || price === undefined) {
       return res.status(400).json({ success: false, message: "noteKey, title, and price are required" });
@@ -693,7 +642,6 @@ export const adminCreatePaidNote = async (req, res) => {
         title,
         price: parsedPrice,
         isEnabled: isEnabled !== undefined ? Boolean(isEnabled) : true,
-        isImportant: isImportant !== undefined ? Boolean(isImportant) : false,
       },
     });
 
@@ -706,7 +654,7 @@ export const adminCreatePaidNote = async (req, res) => {
 export const adminUpdatePaidNote = async (req, res) => {
   try {
     const { noteKey } = req.params;
-    const { title, price, isEnabled, isImportant } = req.body;
+    const { title, price, isEnabled } = req.body;
 
     const updateData = {};
     if (title !== undefined) updateData.title = title;
@@ -718,7 +666,7 @@ export const adminUpdatePaidNote = async (req, res) => {
       updateData.price = parsedPrice;
     }
     if (isEnabled !== undefined) updateData.isEnabled = Boolean(isEnabled);
-    if (isImportant !== undefined) updateData.isImportant = Boolean(isImportant);
+    if (req.body.isFreeMode !== undefined) updateData.isFreeMode = Boolean(req.body.isFreeMode);
 
     const config = await prisma.paidNoteConfig.update({
       where: { noteKey },

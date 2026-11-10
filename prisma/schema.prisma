@@ -89,14 +89,14 @@ model WebhookEvent {
 }
 
 model PaidNoteConfig {
-  id        String   @id @default(cuid())
-  noteKey   String   @unique
-  title     String
-  price     Int
-  isEnabled   Boolean  @default(true)
-  isImportant Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  noteKey    String   @unique
+  title      String
+  price      Int
+  isEnabled  Boolean  @default(true)
+  isFreeMode Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   purchaseOrders  PurchaseOrder[]
   entitlements    NoteEntitlement[]
