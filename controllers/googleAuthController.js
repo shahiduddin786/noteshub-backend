@@ -70,7 +70,7 @@ export const googleWebCallback = async (req, res) => {
     // can be renewed instead of dying with the 10-day access token.
     const refreshToken = jwt.sign({ id: user.id }, process.env.SECRET_KEY, { expiresIn: "30d" });
 
-    await prisma.user.update({ where: { id: user.id }, data: { isLoggedIn: true } });
+    await prisma.user.update({ where: { id: user.id }, data: { isLoggedIn: true, lastActiveAt: new Date() } });
 
     return res.status(200).json({
       success: true,

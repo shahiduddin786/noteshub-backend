@@ -1,6 +1,7 @@
 import express from "express";
 import multer from "multer";
 import { isAdmin } from "../middleware/isAdmin.js";
+import prisma from "../lib/prisma.js";
 import {
   adminUpload,
   adminListFolders,
@@ -44,5 +45,56 @@ router.delete("/cloudinary/folder", isAdmin, adminDeleteCloudinaryFolder);
 router.post("/supabase/folder", isAdmin, adminCreateSupabaseFolder);
 router.put("/supabase/folder", isAdmin, adminRenameSupabaseFolder);
 router.delete("/supabase/folder", isAdmin, adminDeleteSupabaseFolder);
+
+router.get("/users", isAdmin, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const search = req.query.search ? String(req.query.search).trim() : "";
+
+    const where = search
+      ? {
+          OR: [
+            { username: { contains: search, mode: "insensitive" } },
+            { email: { contains: search, mode: "insensitive" } },
+            { id: { contains: search, mode: "insensitive" } },
+          ],
+        }
+      : {};
+
+    const [total, users] = await prisma.$transaction([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          isVerified: true,
+          isLoggedIn: true,
+          authProvider: true,
+          createdAt: true,
+          lastActiveAt: true,
+        },
+      }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      users,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
 
 export default router;

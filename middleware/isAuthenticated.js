@@ -1,6 +1,8 @@
 import jwt from "jsonwebtoken";
 import prisma from "../lib/prisma.js";
 
+const FIVE_MINUTES = 5 * 60 * 1000;
+
 export const isAuthenticated = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -25,6 +27,18 @@ export const isAuthenticated = async (req, res, next) => {
 
     req.user = user;
     req.userId = decoded.id;
+
+    const now = new Date();
+    const needsUpdate =
+      !user.lastActiveAt ||
+      now.getTime() - new Date(user.lastActiveAt).getTime() > FIVE_MINUTES;
+
+    if (needsUpdate) {
+      prisma.user
+        .update({ where: { id: user.id }, data: { lastActiveAt: now } })
+        .catch(() => {});
+    }
+
     next();
   } catch (error) {
     if (error.name === "TokenExpiredError") {

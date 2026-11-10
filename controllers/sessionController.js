@@ -13,10 +13,6 @@ function publicUser(user) {
   };
 }
 
-// POST /api/auth/refresh { refreshToken } -> { accessToken }
-// Stateless: verifies the 30d refresh JWT issued at login and mints a fresh
-// 10d access token. No rotation (refresh tokens are not persisted); clients
-// keep using the same refresh token until it expires, then must re-login.
 export const refreshAccessToken = async (req, res) => {
   try {
     const { refreshToken } = req.body || {};
@@ -36,13 +32,17 @@ export const refreshAccessToken = async (req, res) => {
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
+    const FIVE_MINUTES = 5 * 60 * 1000;
+    const now = new Date();
+    if (!user.lastActiveAt || now.getTime() - user.lastActiveAt.getTime() > FIVE_MINUTES) {
+      prisma.user.update({ where: { id: user.id }, data: { lastActiveAt: now } }).catch(() => {});
+    }
     const accessToken = jwt.sign({ id: user.id }, process.env.SECRET_KEY, { expiresIn: "10d" });
     return res.status(200).json({ success: true, accessToken });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
-
 // GET /api/auth/me (Bearer) -> current user
 export const getMe = async (req, res) => {
   try {

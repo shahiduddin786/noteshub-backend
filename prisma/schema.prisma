@@ -24,6 +24,7 @@ model User {
 
   profilePhotoUrl      String?
   profilePhotoPublicId String?
+  lastActiveAt         DateTime?
 
   sessions         Session[]
   donations        Donation[]

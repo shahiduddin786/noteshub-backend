@@ -258,7 +258,7 @@ export const loginUser = async (req, res) => {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { isLoggedIn: true },
+      data: { isLoggedIn: true, lastActiveAt: new Date() },
     });
 
     return res.status(200).json({

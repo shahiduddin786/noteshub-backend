@@ -43,4 +43,8 @@ router.post("/change-password/:email", validate(resetPasswordWithTokenSchema), c
 
 router.post("/contact", sendContactMail);
 
+router.post("/ping", isAuthenticated, async (req, res) => {
+  return res.status(200).json({ success: true });
+});
+
 export default router;
